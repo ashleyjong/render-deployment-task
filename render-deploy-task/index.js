@@ -11,22 +11,20 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false } 
 });
 
-// Updated Route to include a Form for Writing to the DB
 app.get('/', async (req, res) => {
   try {
-    // Handle form submissions for adding or clearing visitors
     if (req.query.name) {
-      await pool.query('INSERT INTO visitors (name) VALUES ($1)', [req.query.name]);
-      return res.redirect('/'); // Redirect to clean the URL
+      const userAgent = req.headers['user-agent'] || 'Unknown Device';
+      await pool.query('INSERT INTO visitors (name, user_agent) VALUES ($1, $2)', [req.query.name, userAgent]);
+      return res.redirect('/'); 
     } else if (req.query.action === 'clear') {
       await pool.query('DELETE FROM visitors');
       return res.redirect('/');
     }
 
-    // Read all visitors from the DB
     const result = await pool.query('SELECT * FROM visitors ORDER BY id DESC');
+    const totalVisitors = result.rows.length;
     
-    // Beautiful HTML with styling, a form to add, and a form to clear
     const html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -52,7 +50,7 @@ app.get('/', async (req, res) => {
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.08);
             width: 100%;
-            max-width: 450px;
+            max-width: 550px;
           }
           h1 {
             text-align: center;
@@ -113,12 +111,23 @@ app.get('/', async (req, res) => {
             margin: 0;
             color: #4a5568;
             font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+          .badge {
+            background: #e2e8f0;
+            color: #4a5568;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: bold;
           }
           ul {
             list-style-type: none;
             padding: 0;
             margin: 0;
-            max-height: 350px;
+            max-height: 400px;
             overflow-y: auto;
           }
           li {
@@ -128,10 +137,21 @@ app.get('/', async (req, res) => {
             border-radius: 8px;
             border-left: 5px solid #4299e1;
             display: flex;
-            align-items: center;
-            font-weight: 500;
+            flex-direction: column;
             color: #2d3748;
             animation: fadeIn 0.3s ease-in;
+          }
+          .log-name {
+            font-weight: 600;
+            font-size: 16px;
+            margin-bottom: 6px;
+          }
+          .log-meta {
+            font-size: 12px;
+            color: #718096;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
           }
           .empty-state {
             text-align: center;
@@ -139,7 +159,6 @@ app.get('/', async (req, res) => {
             font-style: italic;
             background: transparent;
             border-left: none;
-            justify-content: center;
             padding: 30px 0;
           }
           @keyframes fadeIn {
@@ -150,25 +169,36 @@ app.get('/', async (req, res) => {
       </head>
       <body>
         <div class="container">
-          <h1>Visitor Log 📖</h1>
+          <h1>System Visitor Log</h1>
           
           <form action="/" method="GET" class="form-group">
-            <input type="text" name="name" placeholder="What's your name?" required autocomplete="off">
-            <button type="submit">Add Me</button>
+            <input type="text" name="name" placeholder="Enter visitor name..." required autocomplete="off">
+            <button type="submit">Log Visit</button>
           </form>
           
           <div class="header-actions">
-            <h3>Recent Visitors</h3>
+            <h3>Recent Activity <span class="badge">${totalVisitors} Total</span></h3>
             <form action="/" method="GET" style="margin: 0;">
               <input type="hidden" name="action" value="clear">
-              <button type="submit" class="btn-danger" onclick="return confirm('Are you sure you want to clear all visitors?')">Clear All</button>
+              <button type="submit" class="btn-danger" onclick="return confirm('Are you sure you want to clear the entire log?')">Clear Logs</button>
             </form>
           </div>
 
           <ul>
-            ${result.rows.length > 0 
-              ? result.rows.map(r => `<li>👋 ${r.name}</li>`).join('') 
-              : '<li class="empty-state">No visitors yet. Be the first!</li>'}
+            ${totalVisitors > 0 
+              ? result.rows.map(r => {
+                  const date = r.visit_time ? new Date(r.visit_time).toLocaleString() : 'Unknown Time';
+                  const agent = r.user_agent || 'Unknown Device';
+                  return `
+                  <li>
+                    <div class="log-name">${r.name}</div>
+                    <div class="log-meta">
+                      <span><strong>Time:</strong> ${date}</span>
+                      <span title="${agent}"><strong>Device:</strong> ${agent.length > 50 ? agent.substring(0, 50) + '...' : agent}</span>
+                    </div>
+                  </li>`;
+                }).join('') 
+              : '<li class="empty-state">No visitors logged yet.</li>'}
           </ul>
         </div>
       </body>
@@ -182,7 +212,8 @@ app.get('/', async (req, res) => {
 
 app.post('/add', async (req, res) => {
   const { name } = req.body;
-  await pool.query('INSERT INTO visitors (name) VALUES ($1)', [name]);
+  const userAgent = req.headers['user-agent'] || 'API Client';
+  await pool.query('INSERT INTO visitors (name, user_agent) VALUES ($1, $2)', [name, userAgent]);
   res.status(201).send(`Added ${name}`);
 });
 
@@ -194,7 +225,11 @@ async function initDb() {
         name TEXT NOT NULL
       );
     `);
-    console.log("Database table 'visitors' is ready.");
+    
+    await pool.query(`ALTER TABLE visitors ADD COLUMN IF NOT EXISTS visit_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP;`);
+    await pool.query(`ALTER TABLE visitors ADD COLUMN IF NOT EXISTS user_agent TEXT;`);
+    
+    console.log("Database table 'visitors' is ready with logging metadata.");
   } catch (err) {
     console.error("Error initializing database:", err);
   }
