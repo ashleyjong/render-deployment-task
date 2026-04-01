@@ -11,12 +11,32 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false } 
 });
 
+// Updated Route to include a Form for Writing to the DB
 app.get('/', async (req, res) => {
   try {
+    // Add a new visitor if the form was submitted via URL
+    if (req.query.name) {
+      await pool.query('INSERT INTO visitors (name) VALUES ($1)', [req.query.name]);
+    }
+
+    // Read all visitors from the DB
     const result = await pool.query('SELECT * FROM visitors');
-    res.send(`<h1>Visitor Log</h1><ul>${result.rows.map(r => `<li>${r.name}</li>`).join('')}</ul>`);
+    
+    // Simple HTML with a form and a list
+    const html = `
+      <h1>Visitor Log</h1>
+      <form action="/" method="GET">
+        <input type="text" name="name" placeholder="Enter your name" required>
+        <button type="submit">Add Visitor</button>
+      </form>
+      <hr>
+      <ul>
+        ${result.rows.map(r => `<li>${r.name}</li>`).join('')}
+      </ul>
+    `;
+    res.send(html);
   } catch (err) {
-    res.status(500).send("Database not initialized yet. Error: " + err.message);
+    res.status(500).send("Database Error: " + err.message);
   }
 });
 
