@@ -26,6 +26,22 @@ app.post('/add', async (req, res) => {
   res.status(201).send(`Added ${name}`);
 });
 
-app.listen(port, () => {
-  console.log(`App listening at http://localhost:${port}`);
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS visitors (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+    `);
+    console.log("Database table 'visitors' is ready.");
+  } catch (err) {
+    console.error("Error initializing database:", err);
+  }
+}
+
+initDb().then(() => {
+  app.listen(port, () => {
+    console.log(`App listening at http://localhost:${port}`);
+  });
 });
